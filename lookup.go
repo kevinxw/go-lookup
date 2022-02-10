@@ -5,7 +5,9 @@ very simple DSL you can access to any property, key or value of any value of Go.
 package lookup
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -18,46 +20,62 @@ const (
 )
 
 var (
-	ErrMalformedIndex    = errors.New("Malformed index key")
-	ErrInvalidIndexUsage = errors.New("Invalid index key usage")
-	ErrKeyNotFound       = errors.New("Unable to find the key")
+	ErrMalformedIndex    = errors.New("malformed index key")
+	ErrInvalidIndexUsage = errors.New("invalid index key usage")
+	ErrKeyNotFound       = errors.New("unable to find the key")
 )
+
+type Options struct {
+	// If true, any string that can be parsed into JSON will be expanded as map[string]interface{}
+	ExpandStringAsJSON bool
+	// If true, the lookup path will not be case sensitive.
+	CaseInsentitive bool
+}
 
 // LookupString performs a lookup into a value, using a string. Same as `Lookup`
 // but using a string with the keys separated by `.`
-func LookupString(i interface{}, path string) (reflect.Value, error) {
-	return Lookup(i, strings.Split(path, SplitToken)...)
-}
-
-// LookupStringI is the same as LookupString, but the path is not case
-// sensitive.
-func LookupStringI(i interface{}, path string) (reflect.Value, error) {
-	return LookupI(i, strings.Split(path, SplitToken)...)
-}
-
 // Lookup performs a lookup into a value, using a path of keys. The key should
 // match with a Field or a MapIndex. For slice you can use the syntax key[index]
 // to access a specific index. If one key owns to a slice and an index is not
 // specificied the rest of the path will be apllied to evaley value of the
 // slice, and the value will be merged into a slice.
-func Lookup(i interface{}, path ...string) (reflect.Value, error) {
-	return lookup(i, false, path...)
+func Lookup(i interface{}, path string, opts Options) (interface{}, error) {
+	v, err := lookup(i, strings.Split(path, SplitToken), opts)
+	if err == nil {
+		return v.Interface(), nil
+	}
+	return nil, err
 }
 
-// LookupI is the same as Lookup, but the path keys are not case sensitive.
-func LookupI(i interface{}, path ...string) (reflect.Value, error) {
-	return lookup(i, true, path...)
-}
-
-func lookup(i interface{}, caseInsensitive bool, path ...string) (reflect.Value, error) {
+func lookup(i interface{}, path []string, opts Options) (reflect.Value, error) {
 	value := reflect.ValueOf(i)
+	if len(path) == 0 {
+		return value, nil
+	}
+	if opts.ExpandStringAsJSON {
+		if out := expandStringAsJSON(value); out != nil {
+			value = reflect.ValueOf(out)
+		}
+	}
 	var parent reflect.Value
 	var err error
 
 	for i, part := range path {
+		if opts.ExpandStringAsJSON {
+			// Expand the value if it's expandable and not the last value.
+			if out := expandStringAsJSON(value); out != nil {
+				value = reflect.ValueOf(out)
+			}
+		}
 		parent = value
 
-		value, err = getValueByName(value, part, caseInsensitive)
+		if opts.ExpandStringAsJSON {
+			fmt.Printf("pre: %q %s %v\n", part, value.Type(), value)
+		}
+		value, err = getValueByName(value, part, opts)
+		if opts.ExpandStringAsJSON {
+			fmt.Printf("post: %q  %v\n", part, value)
+		}
 		if err == nil {
 			continue
 		}
@@ -66,15 +84,14 @@ func lookup(i interface{}, caseInsensitive bool, path ...string) (reflect.Value,
 			break
 		}
 
-		value, err = aggreateAggregableValue(parent, path[i:])
-
+		value, err = aggreateAggregableValue(parent, path[i:], opts)
 		break
 	}
 
 	return value, err
 }
 
-func getValueByName(v reflect.Value, key string, caseInsensitive bool) (reflect.Value, error) {
+func getValueByName(v reflect.Value, key string, opts Options) (reflect.Value, error) {
 	var value reflect.Value
 	var index int = -1
 	var err error
@@ -83,13 +100,17 @@ func getValueByName(v reflect.Value, key string, caseInsensitive bool) (reflect.
 	if err != nil {
 		return value, err
 	}
+	if opts.ExpandStringAsJSON {
+		fmt.Printf("key %q index %v\n", key, index)
+
+	}
 	switch v.Kind() {
 	case reflect.Ptr, reflect.Interface:
-		return getValueByName(v.Elem(), key, caseInsensitive)
+		return getValueByName(v.Elem(), key, opts)
 	case reflect.Struct:
 		value = v.FieldByName(key)
 
-		if caseInsensitive && value.Kind() == reflect.Invalid {
+		if opts.CaseInsentitive && value.Kind() == reflect.Invalid {
 			// We don't use FieldByNameFunc, since it returns zero value if the
 			// match func matches multiple fields. Iterate here and return the
 			// first matching field.
@@ -105,7 +126,7 @@ func getValueByName(v reflect.Value, key string, caseInsensitive bool) (reflect.
 		kValue := reflect.Indirect(reflect.New(v.Type().Key()))
 		kValue.SetString(key)
 		value = v.MapIndex(kValue)
-		if caseInsensitive && value.Kind() == reflect.Invalid {
+		if opts.CaseInsentitive && value.Kind() == reflect.Invalid {
 			iter := v.MapRange()
 			for iter.Next() {
 				if strings.EqualFold(key, iter.Key().String()) {
@@ -121,26 +142,26 @@ func getValueByName(v reflect.Value, key string, caseInsensitive bool) (reflect.
 		return reflect.Value{}, ErrKeyNotFound
 	}
 
+	value = getRealValue(value)
 	if index != -1 {
-		if value.Kind() == reflect.Ptr {
-			value = value.Elem()
-		}
-
 		if value.Type().Kind() != reflect.Slice {
 			return reflect.Value{}, ErrInvalidIndexUsage
 		}
 
-		value = value.Index(index)
-	}
-
-	if value.Kind() == reflect.Ptr || value.Kind() == reflect.Interface {
-		value = value.Elem()
+		value = getRealValue(value.Index(index))
 	}
 
 	return value, nil
 }
 
-func aggreateAggregableValue(v reflect.Value, path []string) (reflect.Value, error) {
+func getRealValue(v reflect.Value) reflect.Value {
+	for v.IsValid() && (v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface) {
+		v = v.Elem()
+	}
+	return v
+}
+
+func aggreateAggregableValue(v reflect.Value, path []string, opts Options) (reflect.Value, error) {
 	values := make([]reflect.Value, 0)
 
 	l := v.Len()
@@ -154,7 +175,7 @@ func aggreateAggregableValue(v reflect.Value, path []string) (reflect.Value, err
 
 	index := indexFunction(v)
 	for i := 0; i < l; i++ {
-		value, err := Lookup(index(i).Interface(), path...)
+		value, err := lookup(index(i).Interface(), path, opts)
 		if err != nil {
 			return reflect.Value{}, err
 		}
@@ -282,4 +303,17 @@ func lookupType(ty reflect.Type, path ...string) (reflect.Type, bool) {
 		}
 	}
 	return nil, false
+}
+
+// If the input value is expandable as JSON, returns a non-nil map.
+func expandStringAsJSON(v reflect.Value) map[string]interface{} {
+	if v.Kind() != reflect.String || !v.IsValid() || v.IsZero() {
+		return nil
+	}
+	jsonValue := make(map[string]interface{})
+	// Only returns the JSON instance when marshal succeeds.
+	if err := json.Unmarshal([]byte(v.String()), &jsonValue); err == nil {
+		return jsonValue
+	}
+	return nil
 }
