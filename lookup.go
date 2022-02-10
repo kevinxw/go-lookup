@@ -79,7 +79,7 @@ func getValueByName(v reflect.Value, key string, opts Options) (reflect.Value, e
 
 	key, index, err = parseIndex(key)
 	if err != nil {
-		return value, err
+		return reflect.Value{}, err
 	}
 	switch v.Kind() {
 	case reflect.Ptr, reflect.Interface:
@@ -116,13 +116,13 @@ func getValueByName(v reflect.Value, key string, opts Options) (reflect.Value, e
 	}
 
 	if !value.IsValid() {
-		return reflect.Value{}, status.Errorf(codes.NotFound, "key %s not found", key)
+		return reflect.Value{}, status.Errorf(codes.NotFound, "key %q not found", key)
 	}
 
 	value = getRealValue(value)
 	if index != -1 {
 		if value.Type().Kind() != reflect.Slice {
-			return reflect.Value{}, status.Errorf(codes.InvalidArgument, "key %s is not a list", key)
+			return reflect.Value{}, status.Errorf(codes.InvalidArgument, "key %q is not a list", key)
 		}
 
 		value = getRealValue(value.Index(index))
@@ -145,7 +145,7 @@ func aggreateAggregableValue(v reflect.Value, path []string, opts Options) (refl
 	if l == 0 {
 		ty, ok := lookupType(v.Type(), path...)
 		if !ok {
-			return reflect.Value{}, status.Errorf(codes.NotFound, "path %s not found", strings.Join(path, SplitToken))
+			return reflect.Value{}, status.Errorf(codes.NotFound, "path %q not found", strings.Join(path, SplitToken))
 		}
 		return reflect.MakeSlice(reflect.SliceOf(ty), 0, 0), nil
 	}
