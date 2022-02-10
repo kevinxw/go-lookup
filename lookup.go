@@ -7,7 +7,6 @@ package lookup
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -49,14 +48,6 @@ func Lookup(i interface{}, path string, opts Options) (interface{}, error) {
 
 func lookup(i interface{}, path []string, opts Options) (reflect.Value, error) {
 	value := reflect.ValueOf(i)
-	if len(path) == 0 {
-		return value, nil
-	}
-	if opts.ExpandStringAsJSON {
-		if out := expandStringAsJSON(value); out != nil {
-			value = reflect.ValueOf(out)
-		}
-	}
 	var parent reflect.Value
 	var err error
 
@@ -69,13 +60,7 @@ func lookup(i interface{}, path []string, opts Options) (reflect.Value, error) {
 		}
 		parent = value
 
-		if opts.ExpandStringAsJSON {
-			fmt.Printf("pre: %q %s %v\n", part, value.Type(), value)
-		}
 		value, err = getValueByName(value, part, opts)
-		if opts.ExpandStringAsJSON {
-			fmt.Printf("post: %q  %v\n", part, value)
-		}
 		if err == nil {
 			continue
 		}
@@ -99,10 +84,6 @@ func getValueByName(v reflect.Value, key string, opts Options) (reflect.Value, e
 	key, index, err = parseIndex(key)
 	if err != nil {
 		return value, err
-	}
-	if opts.ExpandStringAsJSON {
-		fmt.Printf("key %q index %v\n", key, index)
-
 	}
 	switch v.Kind() {
 	case reflect.Ptr, reflect.Interface:
