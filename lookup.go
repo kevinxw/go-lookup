@@ -6,22 +6,18 @@ package lookup
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
 	SplitToken     = "."
 	IndexCloseChar = "]"
 	IndexOpenChar  = "["
-)
-
-var (
-	ErrMalformedIndex    = errors.New("malformed index key")
-	ErrInvalidIndexUsage = errors.New("invalid index key usage")
-	ErrKeyNotFound       = errors.New("unable to find the key")
 )
 
 type Options struct {
@@ -120,13 +116,13 @@ func getValueByName(v reflect.Value, key string, opts Options) (reflect.Value, e
 	}
 
 	if !value.IsValid() {
-		return reflect.Value{}, ErrKeyNotFound
+		return reflect.Value{}, status.Errorf(codes.NotFound, "key %s not found", key)
 	}
 
 	value = getRealValue(value)
 	if index != -1 {
 		if value.Type().Kind() != reflect.Slice {
-			return reflect.Value{}, ErrInvalidIndexUsage
+			return reflect.Value{}, status.Errorf(codes.InvalidArgument, "key %s is not a list", key)
 		}
 
 		value = getRealValue(value.Index(index))
@@ -149,7 +145,7 @@ func aggreateAggregableValue(v reflect.Value, path []string, opts Options) (refl
 	if l == 0 {
 		ty, ok := lookupType(v.Type(), path...)
 		if !ok {
-			return reflect.Value{}, ErrKeyNotFound
+			return reflect.Value{}, status.Errorf(codes.NotFound, "path %s not found", strings.Join(path, SplitToken))
 		}
 		return reflect.MakeSlice(reflect.SliceOf(ty), 0, 0), nil
 	}
@@ -249,12 +245,12 @@ func parseIndex(s string) (string, int, error) {
 	}
 
 	if (start != -1 && end == -1) || (start == -1 && end != -1) {
-		return "", -1, ErrMalformedIndex
+		return "", -1, status.Errorf(codes.InvalidArgument, "invalid index %q", s)
 	}
 
 	index, err := strconv.Atoi(s[start+1 : end])
 	if err != nil {
-		return "", -1, ErrMalformedIndex
+		return "", -1, status.Errorf(codes.InvalidArgument, "invalid index %q", s)
 	}
 
 	return s[:start], index, nil

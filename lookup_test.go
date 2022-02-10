@@ -57,10 +57,10 @@ func (s *S) TestLookup_MapNamed(c *C) {
 
 func (s *S) TestLookup_NotFound(c *C) {
 	_, err := Lookup(structFixture, "qux", Options{})
-	c.Assert(err, Equals, ErrKeyNotFound)
+	c.Assert(status.Code(err), Equals, codes.NotFound)
 
 	_, err = Lookup(mapFixture, "qux", Options{})
-	c.Assert(err, Equals, ErrKeyNotFound)
+	c.Assert(status.Code(err), Equals, codes.NotFound)
 }
 
 func (s *S) TestAggregableLookup_StructIndex(c *C) {
@@ -151,24 +151,24 @@ func (s *S) TestParseIndexNooIndex(c *C) {
 
 func (s *S) TestParseIndexMalFormed(c *C) {
 	key, index, err := parseIndex("foo[]")
-	c.Assert(err, Equals, ErrMalformedIndex)
+	c.Assert(status.Code(err), Equals, codes.InvalidArgument)
 	c.Assert(key, Equals, "")
 	c.Assert(index, Equals, -1)
 
 	key, index, err = parseIndex("foo[42")
-	c.Assert(err, Equals, ErrMalformedIndex)
+	c.Assert(status.Code(err), Equals, codes.InvalidArgument)
 	c.Assert(key, Equals, "")
 	c.Assert(index, Equals, -1)
 
 	key, index, err = parseIndex("foo42]")
-	c.Assert(err, Equals, ErrMalformedIndex)
+	c.Assert(status.Code(err), Equals, codes.InvalidArgument)
 	c.Assert(key, Equals, "")
 	c.Assert(index, Equals, -1)
 }
 
 func (s *S) TestLookup_CaseSensitive(c *C) {
 	_, err := Lookup(structFixture, "STring", Options{})
-	c.Assert(err, Equals, ErrKeyNotFound)
+	c.Assert(status.Code(err), Equals, codes.NotFound)
 }
 
 func (s *S) TestLookup_CaseInsensitive(c *C) {
@@ -197,7 +197,7 @@ func (s *S) TestLookup_CaseInsensitiveExactMatch(c *C) {
 
 func (s *S) TestLookup_Map_CaseSensitive(c *C) {
 	_, err := Lookup(map[string]int{"Foo": 42}, "foo", Options{})
-	c.Assert(err, Equals, ErrKeyNotFound)
+	c.Assert(status.Code(err), Equals, codes.NotFound)
 }
 
 func (s *S) TestLookup_Map_CaseInsensitive(c *C) {
