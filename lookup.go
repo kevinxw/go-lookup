@@ -10,24 +10,27 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iancoleman/strcase"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 const (
-	SplitToken     = "."
-	IndexCloseChar = "]"
-	IndexOpenChar  = "["
+	defaultSplitToken = "."
+	indexCloseChar    = "]"
+	indexOpenChar     = "["
 )
+
+type MatchFunc func(string) string
 
 type Options struct {
 	// If true, any string that can be parsed into JSON will be expanded as map[string]interface{}
 	ExpandStringAsJSON bool
-	// If true, the lookup path will not be case sensitive.
-	CaseInsentitive bool
-	// If true, the field name and the lookup path will be converted to snake case before comparison.
-	ConvertToSnakeCaseBeforeCompare bool
+	// A list of functions to be applied before compaing the path and field name.
+	// A section of path and a field in the struct match if any of MatchFunctions returns the same string.
+	// i.e. matchFunc(path) == matchFunc(field)
+	MatchFunctions []MatchFunc
+	// The token used to split a path. If not specified, by default it's ".".
+	SplitToken string
 }
 
 // LookupString performs a lookup into a value, using a string. Same as `Lookup`
@@ -38,7 +41,7 @@ type Options struct {
 // specificied the rest of the path will be apllied to evaley value of the
 // slice, and the value will be merged into a slice.
 func Lookup(i interface{}, path string, opts Options) (interface{}, error) {
-	v, err := lookup(i, strings.Split(path, SplitToken), opts)
+	v, err := lookup(i, strings.Split(path, getSplitToken(&opts)), opts)
 	if err == nil {
 		return v.Interface(), nil
 	}
@@ -90,20 +93,12 @@ func getValueByName(v reflect.Value, key string, opts Options) (reflect.Value, e
 	case reflect.Struct:
 		value = v.FieldByName(key)
 
-		if opts.CaseInsentitive && value.Kind() == reflect.Invalid {
+		if value.Kind() == reflect.Invalid {
 			// We don't use FieldByNameFunc, since it returns zero value if the
 			// match func matches multiple fields. Iterate here and return the
 			// first matching field.
 			for i := 0; i < v.NumField(); i++ {
-				if strings.EqualFold(v.Type().Field(i).Name, key) {
-					value = v.Field(i)
-					break
-				}
-			}
-		}
-		if opts.ConvertToSnakeCaseBeforeCompare && value.Kind() == reflect.Invalid {
-			for i := 0; i < v.NumField(); i++ {
-				if strcase.ToSnake(v.Type().Field(i).Name) == strcase.ToSnake(key) {
+				if compareWithMatchFunc(opts.MatchFunctions, v.Type().Field(i).Name, key) {
 					value = v.Field(i)
 					break
 				}
@@ -114,20 +109,10 @@ func getValueByName(v reflect.Value, key string, opts Options) (reflect.Value, e
 		kValue := reflect.Indirect(reflect.New(v.Type().Key()))
 		kValue.SetString(key)
 		value = v.MapIndex(kValue)
-		if opts.CaseInsentitive && value.Kind() == reflect.Invalid {
+		if value.Kind() == reflect.Invalid {
 			iter := v.MapRange()
 			for iter.Next() {
-				if strings.EqualFold(key, iter.Key().String()) {
-					kValue.SetString(iter.Key().String())
-					value = v.MapIndex(kValue)
-					break
-				}
-			}
-		}
-		if opts.ConvertToSnakeCaseBeforeCompare && value.Kind() == reflect.Invalid {
-			iter := v.MapRange()
-			for iter.Next() {
-				if strcase.ToSnake(iter.Key().String()) == strcase.ToSnake(key) {
+				if compareWithMatchFunc(opts.MatchFunctions, key, iter.Key().String()) {
 					kValue.SetString(iter.Key().String())
 					value = v.MapIndex(kValue)
 					break
@@ -166,7 +151,7 @@ func aggreateAggregableValue(v reflect.Value, path []string, opts Options) (refl
 	if l == 0 {
 		ty, ok := lookupType(v.Type(), path...)
 		if !ok {
-			return reflect.Value{}, status.Errorf(codes.NotFound, "path %q not found", strings.Join(path, SplitToken))
+			return reflect.Value{}, status.Errorf(codes.NotFound, "path %q not found", strings.Join(path, getSplitToken(&opts)))
 		}
 		return reflect.MakeSlice(reflect.SliceOf(ty), 0, 0), nil
 	}
@@ -253,13 +238,9 @@ func isMergeable(v reflect.Value) bool {
 	return k == reflect.Map || k == reflect.Slice
 }
 
-func hasIndex(s string) bool {
-	return strings.Index(s, IndexOpenChar) != -1
-}
-
 func parseIndex(s string) (string, int, error) {
-	start := strings.Index(s, IndexOpenChar)
-	end := strings.Index(s, IndexCloseChar)
+	start := strings.Index(s, indexOpenChar)
+	end := strings.Index(s, indexCloseChar)
 
 	if start == -1 && end == -1 {
 		return s, -1, nil
@@ -284,7 +265,7 @@ func lookupType(ty reflect.Type, path ...string) (reflect.Type, bool) {
 
 	switch ty.Kind() {
 	case reflect.Slice, reflect.Array, reflect.Map:
-		if hasIndex(path[0]) {
+		if strings.ContainsAny(path[0], indexOpenChar+indexCloseChar) {
 			return lookupType(ty.Elem(), path[1:]...)
 		}
 		// Aggregate.
@@ -314,4 +295,20 @@ func expandStringAsJSON(v reflect.Value) map[string]interface{} {
 		return jsonValue
 	}
 	return nil
+}
+
+func getSplitToken(opts *Options) string {
+	if opts != nil && opts.SplitToken != "" {
+		return opts.SplitToken
+	}
+	return defaultSplitToken
+}
+
+func compareWithMatchFunc(matchFuncs []MatchFunc, a, b string) bool {
+	for _, f := range matchFuncs {
+		if f(a) == f(b) {
+			return true
+		}
+	}
+	return false
 }

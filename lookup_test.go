@@ -3,9 +3,11 @@ package lookup
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/iancoleman/strcase"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	. "gopkg.in/check.v1"
@@ -172,25 +174,35 @@ func (s *S) TestLookup_CaseSensitive(c *C) {
 }
 
 func (s *S) TestLookup_CaseInsensitive(c *C) {
-	value, err := Lookup(structFixture, "STring", Options{CaseInsentitive: true})
+	value, err := Lookup(structFixture, "STring", Options{
+		MatchFunctions: []MatchFunc{
+			strings.ToLower,
+		},
+	})
 	c.Assert(err, IsNil)
 	c.Assert(value, Equals, "foo")
 }
 
 func (s *S) TestLookup_CaseInsensitive_ExactMatch(c *C) {
-	value, err := Lookup(caseFixtureStruct, "Testfield", Options{CaseInsentitive: true})
+	value, err := Lookup(caseFixtureStruct, "Testfield", Options{MatchFunctions: []MatchFunc{
+		strings.ToLower,
+	}})
 	c.Assert(err, IsNil)
 	c.Assert(value, Equals, 2)
 }
 
 func (s *S) TestLookup_CaseInsensitive_FirstMatch(c *C) {
-	value, err := Lookup(caseFixtureStruct, "testfield", Options{CaseInsentitive: true})
+	value, err := Lookup(caseFixtureStruct, "testfield", Options{MatchFunctions: []MatchFunc{
+		strings.ToLower,
+	}})
 	c.Assert(err, IsNil)
 	c.Assert(value, Equals, 1)
 }
 
 func (s *S) TestLookup_CaseInsensitiveExactMatch(c *C) {
-	value, err := Lookup(structFixture, "STring", Options{CaseInsentitive: true})
+	value, err := Lookup(structFixture, "STring", Options{MatchFunctions: []MatchFunc{
+		strings.ToLower,
+	}})
 	c.Assert(err, IsNil)
 	c.Assert(value, Equals, "foo")
 }
@@ -201,13 +213,17 @@ func (s *S) TestLookup_Map_CaseSensitive(c *C) {
 }
 
 func (s *S) TestLookup_Map_CaseInsensitive(c *C) {
-	value, err := Lookup(map[string]int{"Foo": 42}, "foo", Options{CaseInsentitive: true})
+	value, err := Lookup(map[string]int{"Foo": 42}, "foo", Options{MatchFunctions: []MatchFunc{
+		strings.ToLower,
+	}})
 	c.Assert(err, IsNil)
 	c.Assert(value, Equals, 42)
 }
 
 func (s *S) TestLookup_Map_CaseInsensitive_ExactMatch(c *C) {
-	value, err := Lookup(caseFixtureMap, "Testkey", Options{CaseInsentitive: true})
+	value, err := Lookup(caseFixtureMap, "Testkey", Options{MatchFunctions: []MatchFunc{
+		strings.ToLower,
+	}})
 	c.Assert(err, IsNil)
 	c.Assert(value, Equals, 2)
 }
@@ -224,7 +240,9 @@ func (s *S) TestLookup_ListPtr(c *C) {
 	values := []Inner{{Value: "first"}, {Value: "second"}}
 	data := Outer{Values: &values}
 
-	value, err := Lookup(data, "Values[0].Value", Options{CaseInsentitive: true})
+	value, err := Lookup(data, "Values[0].Value", Options{MatchFunctions: []MatchFunc{
+		strings.ToLower,
+	}})
 	c.Assert(err, IsNil)
 	c.Assert(value, Equals, "first")
 }
@@ -306,8 +324,10 @@ func TestLookup(t *testing.T) {
 			input: &structFixture,
 			path:  "json_string.Struct.Array[1]",
 			opts: Options{
-				ExpandStringAsJSON:              true,
-				ConvertToSnakeCaseBeforeCompare: true,
+				ExpandStringAsJSON: true,
+				MatchFunctions: []MatchFunc{
+					strcase.ToSnake,
+				},
 			},
 			want: float64(2),
 		},
@@ -318,7 +338,9 @@ func TestLookup(t *testing.T) {
 		for _, caseSensitive := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s - CaseSensitive=%v", tc.desc, caseSensitive), func(t *testing.T) {
 				opts := tc.opts
-				opts.CaseInsentitive = caseSensitive
+				if !caseSensitive {
+					opts.MatchFunctions = append(opts.MatchFunctions, strings.ToLower)
+				}
 
 				got, err := Lookup(tc.input, tc.path, opts)
 				if code := status.Code(err); code != tc.wantErr {
@@ -387,7 +409,9 @@ func ExampleCaseInsensitive() {
 		SoftwareUpdated: true,
 	}
 
-	value, _ := Lookup(i, "softwareupdated", Options{CaseInsentitive: true})
+	value, _ := Lookup(i, "softwareupdated", Options{MatchFunctions: []MatchFunc{
+		strings.ToLower,
+	}})
 	fmt.Println(value)
 	// Output: true
 }
