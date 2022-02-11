@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/iancoleman/strcase"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -25,6 +26,8 @@ type Options struct {
 	ExpandStringAsJSON bool
 	// If true, the lookup path will not be case sensitive.
 	CaseInsentitive bool
+	// If true, the field name and the lookup path will be converted to snake case before comparison.
+	ConvertToSnakeCaseBeforeCompare bool
 }
 
 // LookupString performs a lookup into a value, using a string. Same as `Lookup`
@@ -98,6 +101,14 @@ func getValueByName(v reflect.Value, key string, opts Options) (reflect.Value, e
 				}
 			}
 		}
+		if opts.ConvertToSnakeCaseBeforeCompare && value.Kind() == reflect.Invalid {
+			for i := 0; i < v.NumField(); i++ {
+				if strcase.ToSnake(v.Type().Field(i).Name) == strcase.ToSnake(key) {
+					value = v.Field(i)
+					break
+				}
+			}
+		}
 
 	case reflect.Map:
 		kValue := reflect.Indirect(reflect.New(v.Type().Key()))
@@ -107,6 +118,16 @@ func getValueByName(v reflect.Value, key string, opts Options) (reflect.Value, e
 			iter := v.MapRange()
 			for iter.Next() {
 				if strings.EqualFold(key, iter.Key().String()) {
+					kValue.SetString(iter.Key().String())
+					value = v.MapIndex(kValue)
+					break
+				}
+			}
+		}
+		if opts.ConvertToSnakeCaseBeforeCompare && value.Kind() == reflect.Invalid {
+			iter := v.MapRange()
+			for iter.Next() {
+				if strcase.ToSnake(iter.Key().String()) == strcase.ToSnake(key) {
 					kValue.SetString(iter.Key().String())
 					value = v.MapIndex(kValue)
 					break

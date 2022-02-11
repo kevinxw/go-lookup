@@ -301,6 +301,16 @@ func TestLookup(t *testing.T) {
 			},
 			want: float64(2),
 		},
+		{
+			desc:  "Expanded String - Array - Pointer",
+			input: &structFixture,
+			path:  "json_string.Struct.Array[1]",
+			opts: Options{
+				ExpandStringAsJSON:              true,
+				ConvertToSnakeCaseBeforeCompare: true,
+			},
+			want: float64(2),
+		},
 	}
 
 	for _, tc := range testCases {
